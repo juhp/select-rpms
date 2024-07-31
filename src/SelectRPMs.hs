@@ -1,0 +1,215 @@
+module SelectRPMs (
+  installArgs,
+  checkSelection,
+  decideRpms,
+  Yes(..)
+  )
+where
+
+import Control.Monad.Extra (forM_, mapMaybeM, when)
+import Data.List.Extra (foldl', nubOrd, nubSort, (\\))
+import Data.RPM.NVRA (NVRA(..), showNVRA)
+import Safe (headMay)
+import SimpleCmd (cmdMaybe, error')
+import SimplePrompt (yesNoDefault)
+import System.FilePath ((<.>))
+import System.FilePath.Glob (compile, isLiteral, match)
+
+data Select = All
+            | Ask
+            | PkgsReq
+              [String] -- include matches
+              [String] -- except matches
+              [String] -- exclude
+              [String] -- adde
+  deriving Eq
+
+installArgs :: String -> Select
+installArgs cs =
+  case words cs of
+    ["-a"] -> All
+    ["--all"] -> All
+    ["-A"] -> Ask
+    ["--ask"] -> Ask
+    ws -> installPairs [] [] [] [] ws
+  where
+    installPairs :: [String] -> [String] -> [String] -> [String]
+                 -> [String] -> Select
+    installPairs incl except excl add [] = PkgsReq incl except excl add
+    installPairs incl except excl add (w:ws)
+      | w `elem` ["-p","--package"] =
+          case ws of
+            [] -> error' "--install opts: --package missing value"
+            (w':ws') -> checkPat w' $
+                        installPairs (w':incl) except excl add ws'
+      | w `elem` ["-e","--except"] =
+          case ws of
+            [] -> error' "--install opts: --except missing value"
+            (w':ws') -> checkPat w' $
+                        installPairs incl (w':except) excl add ws'
+      | w `elem` ["-x","--exclude"] =
+          case ws of
+            [] -> error' "--install opts: --exclude missing value"
+            (w':ws') -> checkPat w' $
+                        installPairs incl except (w':excl) add ws'
+      | w `elem` ["-i","--include"] =
+          case ws of
+            [] -> error' "--install opts: --include missing value"
+            (w':ws') -> checkPat w' $
+                        installPairs incl except excl (w':add) ws'
+      | otherwise = error' "invalid --install opts"
+
+    checkPat w' f =
+      if null w'
+      then error' "empty pattern!"
+      else f
+
+checkSelection :: Monad m => Select -> m ()
+checkSelection (PkgsReq ps es xs is) =
+  forM_ (ps ++ es ++ xs ++ is) $ \s ->
+  when (null s) $ error' "empty package pattern not allowed"
+checkSelection _ = return ()
+
+data ExistingStrategy = ExistingNoReinstall | ExistingSkip
+
+data Yes = No | Yes
+  deriving Eq
+
+data Existence = ExistingNVR | ChangedNVR | NotInstalled
+  deriving (Eq, Ord, Show)
+
+-- FIXME determine and add missing internal deps
+decideRpms :: Yes -> Bool -> Maybe ExistingStrategy -> Select -> String
+           -> [NVRA] -> IO [(Existence,NVRA)]
+decideRpms yes listmode mstrategy select prefix nvras = do
+  classified <- mapMaybeM installExists (filter isBinaryRpm nvras)
+  if listmode
+    then do
+    case select of
+      PkgsReq subpkgs exceptpkgs exclpkgs addpkgs ->
+        mapM_ printInstalled $
+        selectRPMs prefix (subpkgs,exceptpkgs,exclpkgs,addpkgs) classified
+      _ -> mapM_ printInstalled classified
+    return []
+    else
+    case select of
+      All -> promptPkgs yes classified
+      Ask -> mapMaybeM (rpmPrompt yes) classified
+      PkgsReq subpkgs exceptpkgs exclpkgs addpkgs ->
+        promptPkgs yes $
+        selectRPMs prefix (subpkgs,exceptpkgs,exclpkgs,addpkgs) classified
+  where
+    installExists :: NVRA -> IO (Maybe (Existence, NVRA))
+    installExists nvra = do
+      -- FIXME this will fail for noarch changes
+      -- FIXME check kernel
+      minstalled <- cmdMaybe "rpm" ["-q", rpmName nvra <.> rpmArch nvra]
+      let existence =
+            case minstalled of
+              Nothing -> NotInstalled
+              Just installed ->
+                if showNVRA nvra `elem` lines installed
+                then ExistingNVR
+                else ChangedNVR
+      return $
+        case mstrategy of
+          Just ExistingSkip | existence /= NotInstalled -> Nothing
+          Just ExistingNoReinstall | existence == ExistingNVR -> Nothing
+          _ -> Just (existence, nvra)
+
+selectRPMs :: String
+           -> ([String],[String],[String],[String]) -- (subpkgs,except,exclpkgs,addpkgs)
+           -> [(Existence,NVRA)] -> [(Existence,NVRA)]
+selectRPMs prefix (subpkgs,exceptpkgs,exclpkgs,addpkgs) rpms =
+  let excluded = matchingRPMs prefix exclpkgs rpms
+      included = matchingRPMs prefix addpkgs rpms
+      matching =
+        if null subpkgs && null exceptpkgs
+        then defaultRPMs rpms
+        else matchingRPMs prefix subpkgs rpms
+      nonmatching = nonMatchingRPMs prefix exceptpkgs rpms
+  in nubSort $ ((matching ++ nonmatching) \\ excluded) ++ included
+
+isBinaryRpm :: NVRA -> Bool
+isBinaryRpm = (/= "src") . rpmArch
+
+renderInstalled :: (Existence, NVRA) -> String
+renderInstalled (exist, nvra) =
+  case exist of
+    ExistingNVR -> '='
+    ChangedNVR -> '^'
+    NotInstalled -> '+'
+  : showNVRA nvra
+
+printInstalled :: (Existence, NVRA) -> IO ()
+printInstalled = putStrLn . renderInstalled
+
+promptPkgs :: Yes -> [(Existence,NVRA)] -> IO [(Existence,NVRA)]
+promptPkgs _ [] = error' "no rpms found"
+promptPkgs yes classified = do
+  mapM_ printInstalled classified
+  ok <- prompt yes "install above"
+  return $ if ok then classified else []
+
+prompt :: Yes -> String -> IO Bool
+prompt yes str = do
+  if yes == Yes
+    then return True
+    else yesNoDefault True str
+
+rpmPrompt :: Yes -> (Existence,NVRA) -> IO (Maybe (Existence,NVRA))
+rpmPrompt yes (exist,nvra) = do
+  ok <- prompt yes $ renderInstalled (exist,nvra)
+  return $
+    if ok
+    then Just (exist,nvra)
+    else Nothing
+
+defaultRPMs :: [(Existence,NVRA)] -> [(Existence,NVRA)]
+defaultRPMs rpms =
+  let installed = filter ((/= NotInstalled) . fst) rpms
+  in if null installed
+     then rpms
+     else installed
+
+matchingRPMs :: String -> [String] -> [(Existence,NVRA)] -> [(Existence,NVRA)]
+matchingRPMs prefix subpkgs rpms =
+  nubSort . mconcat $
+  flip map (nubOrd subpkgs) $ \ pkgpat ->
+  case getMatches pkgpat of
+    [] -> if headMay pkgpat /= Just '*'
+          then
+            case getMatches (prefix ++ '-' : pkgpat) of
+              [] -> error' $ "no subpackage match for " ++ pkgpat
+              result -> result
+          else error' $ "no subpackage match for " ++ pkgpat
+    result -> result
+  where
+    getMatches :: String -> [(Existence,NVRA)]
+    getMatches pkgpat =
+      filter (match (compile pkgpat) . rpmName . snd) rpms
+
+nonMatchingRPMs :: String -> [String] -> [(Existence,NVRA)] -> [(Existence,NVRA)]
+nonMatchingRPMs _ [] _ = []
+nonMatchingRPMs prefix subpkgs rpms =
+  -- FIXME somehow determine unused excludes
+  nubSort $ foldl' (exclude (nubOrd subpkgs)) [] rpms
+  where
+    rpmnames = map (rpmName . snd) rpms
+
+    exclude :: [String] -> [(Existence,NVRA)] -> (Existence,NVRA)
+            -> [(Existence,NVRA)]
+    exclude [] acc rpm = acc ++ [rpm]
+    exclude (pat:pats) acc rpm =
+        if checkMatch (rpmName (snd rpm))
+        then acc
+        else exclude pats acc rpm
+      where
+        checkMatch :: String -> Bool
+        checkMatch rpmname =
+          let comppat = compile pat
+          in if isLiteral comppat
+             then pat == rpmname ||
+                  pat `notElem` rpmnames &&
+                  (prefix ++ '-' : pat) == rpmname
+             else match comppat rpmname
