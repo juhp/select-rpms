@@ -9,6 +9,7 @@ module SelectRPMs (
   showRpm,
   Existence(..),
   ExistingStrategy(..),
+  ExistPathNVRA,
   PkgMgr(..),
   Select(..),
   Yes(..)
@@ -18,7 +19,9 @@ where
 import Control.Monad.Extra (forM_, mapMaybeM, unless, when)
 import Data.Either (partitionEithers)
 import Data.List.Extra (foldl', isInfixOf, nubOrd, nubSort, (\\))
+import Data.Maybe (fromMaybe)
 import Data.RPM.NVRA (NVRA(..), showNVRA)
+import Data.Tuple.Extra (fst3, thd3)
 import Safe (headMay)
 import SimpleCmd (cmd_, cmdMaybe, error', sudo_, (+-+))
 import SimplePrompt (yesNoDefault)
@@ -92,11 +95,13 @@ data Yes = No | Yes
 data Existence = ExistingNVR | ChangedNVR | NotInstalled
   deriving (Eq, Ord, Show)
 
+type ExistPathNVRA = (Existence,Maybe FilePath,NVRA)
+
 -- FIXME determine and add missing internal deps
 decideRPMs :: Yes -> Bool -> Maybe ExistingStrategy -> Select -> String
-           -> [NVRA] -> IO [(Existence,FilePath,NVRA)]
-decideRPMs yes listmode mstrategy select prefix nvras = do
-  classified <- mapMaybeM installExists (filter isBinaryRpm nvras)
+           -> [(Maybe FilePath,NVRA)] -> IO [ExistPathNVRA]
+decideRPMs yes listmode mstrategy select prefix mfpnvras = do
+  classified <- mapMaybeM installExists (filter (isBinaryRpm . snd) mfpnvras)
   if listmode
     then do
     case select of
@@ -113,8 +118,8 @@ decideRPMs yes listmode mstrategy select prefix nvras = do
         promptPkgs yes $
         selectRPMs prefix (subpkgs,exceptpkgs,exclpkgs,addpkgs) classified
   where
-    installExists :: NVRA -> IO (Maybe (Existence, NVRA))
-    installExists nvra = do
+    installExists :: (Maybe FilePath,NVRA) -> IO (Maybe ExistPathNVRA)
+    installExists (mfp,nvra) = do
       -- FIXME this will fail for noarch changes
       -- FIXME check kernel
       minstalled <- cmdMaybe "rpm" ["-q", rpmName nvra <.> rpmArch nvra]
@@ -129,11 +134,11 @@ decideRPMs yes listmode mstrategy select prefix nvras = do
         case mstrategy of
           Just ExistingSkip | existence /= NotInstalled -> Nothing
           Just ExistingNoReinstall | existence == ExistingNVR -> Nothing
-          _ -> Just (existence, nvra)
+          _ -> Just (existence, mfp, nvra)
 
 selectRPMs :: String
            -> ([String],[String],[String],[String]) -- (subpkgs,except,exclpkgs,addpkgs)
-           -> [(Existence,NVRA)] -> [(Existence,NVRA)]
+           -> [ExistPathNVRA] -> [ExistPathNVRA]
 selectRPMs prefix (subpkgs,exceptpkgs,exclpkgs,addpkgs) rpms =
   let excluded = matchingRPMs prefix exclpkgs rpms
       included = matchingRPMs prefix addpkgs rpms
@@ -147,19 +152,19 @@ selectRPMs prefix (subpkgs,exceptpkgs,exclpkgs,addpkgs) rpms =
 isBinaryRpm :: NVRA -> Bool
 isBinaryRpm = (/= "src") . rpmArch
 
-renderInstalled :: (Existence, NVRA) -> String
-renderInstalled (exist, nvra) =
+renderInstalled :: ExistPathNVRA -> String
+renderInstalled (exist, _path, nvra) =
   case exist of
     ExistingNVR -> '='
     ChangedNVR -> '^'
     NotInstalled -> '+'
   : showNVRA nvra
 
-printInstalled :: (Existence, NVRA) -> IO ()
+printInstalled :: ExistPathNVRA -> IO ()
 printInstalled = putStrLn . renderInstalled
 
-promptPkgs :: Yes -> [(Existence,FilePath,NVRA)]
-           -> IO [(Existence,FilePath,NVRA)]
+promptPkgs :: Yes -> [ExistPathNVRA]
+           -> IO [ExistPathNVRA]
 promptPkgs _ [] = error' "no rpms found"
 promptPkgs yes classified = do
   mapM_ printInstalled classified
@@ -172,22 +177,22 @@ prompt yes str = do
     then return True
     else yesNoDefault True str
 
-rpmPrompt :: Yes -> (Existence,NVRA) -> IO (Maybe (Existence,NVRA))
-rpmPrompt yes (exist,nvra) = do
-  ok <- prompt yes $ renderInstalled (exist,nvra)
+rpmPrompt :: Yes -> ExistPathNVRA -> IO (Maybe ExistPathNVRA)
+rpmPrompt yes epn = do
+  ok <- prompt yes $ renderInstalled epn
   return $
     if ok
-    then Just (exist,nvra)
+    then Just epn
     else Nothing
 
-defaultRPMs :: [(Existence,NVRA)] -> [(Existence,NVRA)]
+defaultRPMs :: [ExistPathNVRA] -> [ExistPathNVRA]
 defaultRPMs rpms =
-  let installed = filter ((/= NotInstalled) . fst) rpms
+  let installed = filter ((/= NotInstalled) . fst3) rpms
   in if null installed
      then rpms
      else installed
 
-matchingRPMs :: String -> [String] -> [(Existence,NVRA)] -> [(Existence,NVRA)]
+matchingRPMs :: String -> [String] -> [ExistPathNVRA] -> [ExistPathNVRA]
 matchingRPMs prefix subpkgs rpms =
   nubSort . mconcat $
   flip map (nubOrd subpkgs) $ \ pkgpat ->
@@ -200,23 +205,23 @@ matchingRPMs prefix subpkgs rpms =
           else error' $ "no subpackage match for " ++ pkgpat
     result -> result
   where
-    getMatches :: String -> [(Existence,NVRA)]
+    getMatches :: String -> [ExistPathNVRA]
     getMatches pkgpat =
-      filter (match (compile pkgpat) . rpmName . snd) rpms
+      filter (match (compile pkgpat) . rpmName . thd3) rpms
 
-nonMatchingRPMs :: String -> [String] -> [(Existence,NVRA)] -> [(Existence,NVRA)]
+nonMatchingRPMs :: String -> [String] -> [ExistPathNVRA] -> [ExistPathNVRA]
 nonMatchingRPMs _ [] _ = []
 nonMatchingRPMs prefix subpkgs rpms =
   -- FIXME somehow determine unused excludes
   nubSort $ foldl' (exclude (nubOrd subpkgs)) [] rpms
   where
-    rpmnames = map (rpmName . snd) rpms
+    rpmnames = map (rpmName . thd3) rpms
 
-    exclude :: [String] -> [(Existence,NVRA)] -> (Existence,NVRA)
-            -> [(Existence,NVRA)]
+    exclude :: [String] -> [ExistPathNVRA] -> ExistPathNVRA
+            -> [ExistPathNVRA]
     exclude [] acc rpm = acc ++ [rpm]
     exclude (pat:pats) acc rpm =
-        if checkMatch (rpmName (snd rpm))
+        if checkMatch (rpmName (thd3 rpm))
         then acc
         else exclude pats acc rpm
       where
@@ -241,7 +246,7 @@ data PkgMgr = DNF3 | DNF5 | RPM | OSTREE
 -- FIXME support options per build: install ibus imsettings -i plasma
 -- (or don't error if multiple packages)
 installRPMs :: Bool -> Bool -> Maybe PkgMgr -> Yes
-            -> [(FilePath,[(Existence,NVRA)])] -> IO ()
+            -> [ExistPathNVRA] -> IO ()
 installRPMs _ _ _ _ [] = return ()
 installRPMs dryrun debug mmgr yes classified = do
   case installTypes classified of
@@ -250,7 +255,7 @@ installRPMs dryrun debug mmgr yes classified = do
       doInstall ReInstall (ris ++ is) -- include any new deps
       doInstall Install is            -- install any non-deps
   where
-    doInstall :: InstallType -> [(FilePath,NVRA)] -> IO ()
+    doInstall :: InstallType -> [(Maybe FilePath,NVRA)] -> IO ()
     doInstall inst dirpkgs =
       unless (null dirpkgs) $ do
       mgr <-
@@ -283,14 +288,13 @@ installRPMs dryrun debug mmgr yes classified = do
             _ -> sudo_) pkgmgr $
             com ++ map showRpmFile dirpkgs ++ ["--assumeyes" | yes == Yes && mgr `elem` [DNF3,DNF5]]
 
-    installTypes :: [(FilePath,[(Existence,NVRA)])]
-                 -> ([(FilePath,NVRA)],[(FilePath,NVRA)])
-    installTypes = partitionEithers  . concatMap mapDir
+    installTypes :: [ExistPathNVRA]
+                 -> ([(Maybe FilePath,NVRA)],[(Maybe FilePath,NVRA)])
+    installTypes = partitionEithers . map partExist
       where
-        mapDir :: (FilePath,[(Existence,NVRA)])
-               -> [Either (FilePath,NVRA) (FilePath,NVRA)]
-        mapDir (dir,cls) =
-          map (\(e,n) -> combineExist e (dir,n)) cls
+        partExist :: ExistPathNVRA
+                  -> Either (Maybe FilePath,NVRA) (Maybe FilePath,NVRA)
+        partExist (e,mdir,n) = combineExist e (mdir,n)
 
         combineExist e = if e == ExistingNVR then Left else Right
 
@@ -313,5 +317,5 @@ installRPMs dryrun debug mmgr yes classified = do
 showRpm :: NVRA -> FilePath
 showRpm nvra = showNVRA nvra <.> "rpm"
 
-showRpmFile :: (FilePath,NVRA) -> FilePath
-showRpmFile (dir,nvra) = dir </> showRpm nvra
+showRpmFile :: (Maybe FilePath,NVRA) -> FilePath
+showRpmFile (mdir,nvra) = fromMaybe "" mdir </> showRpm nvra
