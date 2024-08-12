@@ -4,7 +4,7 @@ version:             0.1.0
 synopsis:            Select packages project
 description:
         Short paragraph here
-license:             BSD-3-Clause
+license:             MIT
 license-file:        LICENSE
 author:              Jens Petersen <juhpetersen@gmail.com>
 maintainer:          Jens Petersen <juhpetersen@gmail.com>
@@ -28,6 +28,7 @@ source-repository head
 
 library
   build-depends:       base < 5,
+                       directory,
                        extra,
                        filepath,
                        Glob,

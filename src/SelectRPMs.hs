@@ -1,18 +1,29 @@
 module SelectRPMs (
   installArgs,
   checkSelection,
-  decideRpms,
+  decideRPMs,
+  installRPMs,
+  notDebugPkg,
+  printInstalled,
+  selectDefault,
+  showRpm,
+  Existence(..),
+  ExistingStrategy(..),
+  PkgMgr(..),
+  Select(..),
   Yes(..)
   )
 where
 
-import Control.Monad.Extra (forM_, mapMaybeM, when)
-import Data.List.Extra (foldl', nubOrd, nubSort, (\\))
+import Control.Monad.Extra (forM_, mapMaybeM, unless, when)
+import Data.Either (partitionEithers)
+import Data.List.Extra (foldl', isInfixOf, nubOrd, nubSort, (\\))
 import Data.RPM.NVRA (NVRA(..), showNVRA)
 import Safe (headMay)
-import SimpleCmd (cmdMaybe, error')
+import SimpleCmd (cmd_, cmdMaybe, error', sudo_, (+-+))
 import SimplePrompt (yesNoDefault)
-import System.FilePath ((<.>))
+import System.Directory
+import System.FilePath ((</>), (<.>))
 import System.FilePath.Glob (compile, isLiteral, match)
 
 data Select = All
@@ -23,6 +34,9 @@ data Select = All
               [String] -- exclude
               [String] -- adde
   deriving Eq
+
+selectDefault :: Select
+selectDefault = PkgsReq [] [] [] []
 
 installArgs :: String -> Select
 installArgs cs =
@@ -79,9 +93,9 @@ data Existence = ExistingNVR | ChangedNVR | NotInstalled
   deriving (Eq, Ord, Show)
 
 -- FIXME determine and add missing internal deps
-decideRpms :: Yes -> Bool -> Maybe ExistingStrategy -> Select -> String
-           -> [NVRA] -> IO [(Existence,NVRA)]
-decideRpms yes listmode mstrategy select prefix nvras = do
+decideRPMs :: Yes -> Bool -> Maybe ExistingStrategy -> Select -> String
+           -> [NVRA] -> IO [(Existence,FilePath,NVRA)]
+decideRPMs yes listmode mstrategy select prefix nvras = do
   classified <- mapMaybeM installExists (filter isBinaryRpm nvras)
   if listmode
     then do
@@ -144,7 +158,8 @@ renderInstalled (exist, nvra) =
 printInstalled :: (Existence, NVRA) -> IO ()
 printInstalled = putStrLn . renderInstalled
 
-promptPkgs :: Yes -> [(Existence,NVRA)] -> IO [(Existence,NVRA)]
+promptPkgs :: Yes -> [(Existence,FilePath,NVRA)]
+           -> IO [(Existence,FilePath,NVRA)]
 promptPkgs _ [] = error' "no rpms found"
 promptPkgs yes classified = do
   mapM_ printInstalled classified
@@ -213,3 +228,90 @@ nonMatchingRPMs prefix subpkgs rpms =
                   pat `notElem` rpmnames &&
                   (prefix ++ '-' : pat) == rpmname
              else match comppat rpmname
+
+notDebugPkg :: String -> Bool
+notDebugPkg p =
+  not ("-debuginfo-" `isInfixOf` p || "-debugsource-" `isInfixOf` p)
+
+data InstallType = ReInstall | Install
+
+data PkgMgr = DNF3 | DNF5 | RPM | OSTREE
+  deriving Eq
+
+-- FIXME support options per build: install ibus imsettings -i plasma
+-- (or don't error if multiple packages)
+installRPMs :: Bool -> Bool -> Maybe PkgMgr -> Yes
+            -> [(FilePath,[(Existence,NVRA)])] -> IO ()
+installRPMs _ _ _ _ [] = return ()
+installRPMs dryrun debug mmgr yes classified = do
+  case installTypes classified of
+    ([],is) -> doInstall Install is
+    (ris,is) -> do
+      doInstall ReInstall (ris ++ is) -- include any new deps
+      doInstall Install is            -- install any non-deps
+  where
+    doInstall :: InstallType -> [(FilePath,NVRA)] -> IO ()
+    doInstall inst dirpkgs =
+      unless (null dirpkgs) $ do
+      mgr <-
+        case mmgr of
+          Just m -> return m
+          Nothing -> do
+            ostree <- doesDirectoryExist "/sysroot/ostree"
+            if ostree
+              then return OSTREE
+              else do
+              mdnf5 <- findExecutable "dnf5"
+              return $ maybe DNF3 (const DNF5) mdnf5
+      let pkgmgr =
+            case mgr of
+              DNF3 -> "dnf-3"
+              DNF5 -> "dnf5"
+              RPM -> "rpm"
+              OSTREE -> "rpm-ostree"
+          com =
+            case inst of
+              ReInstall -> reinstallCommand mgr
+              Install -> installCommand mgr
+        in
+        if dryrun
+        then mapM_ putStrLn $ ("would" +-+ unwords (pkgmgr : com) ++ ":") : map showRpmFile dirpkgs
+        else do
+          when debug $ mapM_ (putStrLn . showRpmFile) dirpkgs
+          (case mgr of
+            OSTREE -> cmd_
+            _ -> sudo_) pkgmgr $
+            com ++ map showRpmFile dirpkgs ++ ["--assumeyes" | yes == Yes && mgr `elem` [DNF3,DNF5]]
+
+    installTypes :: [(FilePath,[(Existence,NVRA)])]
+                 -> ([(FilePath,NVRA)],[(FilePath,NVRA)])
+    installTypes = partitionEithers  . concatMap mapDir
+      where
+        mapDir :: (FilePath,[(Existence,NVRA)])
+               -> [Either (FilePath,NVRA) (FilePath,NVRA)]
+        mapDir (dir,cls) =
+          map (\(e,n) -> combineExist e (dir,n)) cls
+
+        combineExist e = if e == ExistingNVR then Left else Right
+
+    reinstallCommand :: PkgMgr -> [String]
+    reinstallCommand mgr =
+      case mgr of
+        DNF3 -> ["reinstall"]
+        DNF5 -> ["reinstall"]
+        RPM -> ["-Uvh","--replacepkgs"]
+        OSTREE -> ["install"]
+
+    installCommand :: PkgMgr -> [String]
+    installCommand mgr =
+      case mgr of
+        DNF3 -> ["localinstall"]
+        DNF5 -> ["install"]
+        RPM -> ["-ivh"]
+        OSTREE -> ["install"]
+
+showRpm :: NVRA -> FilePath
+showRpm nvra = showNVRA nvra <.> "rpm"
+
+showRpmFile :: (FilePath,NVRA) -> FilePath
+showRpmFile (dir,nvra) = dir </> showRpm nvra
