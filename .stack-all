@@ -1,0 +1,3 @@
+[versions]
+# lts-13: Module ‘SimpleCmd’ does not export ‘sudo_’
+oldest = lts-14
