@@ -1,3 +1,5 @@
+{-# LANGUAGE TupleSections #-}
+
 module SelectRPMs (
   installArgs,
   checkSelection,
@@ -255,7 +257,7 @@ installRPMs dryrun debug mmgr yes classifieds = do
       doInstall Install is            -- install any non-deps
   where
     zipDir :: (FilePath,[ExistNVRA]) -> [(FilePath,ExistNVRA)]
-    zipDir (dir, rpms) = zip (repeat dir) rpms
+    zipDir (dir, rpms) = map (dir,) rpms
 
     installTypes :: [(FilePath,ExistNVRA)]
                  -> ([(FilePath,NVRA)],[(FilePath,NVRA)])
