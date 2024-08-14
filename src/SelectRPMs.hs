@@ -9,6 +9,7 @@ module SelectRPMs (
   notDebugPkg,
   printInstalled,
   selectDefault,
+  selectOptions,
   showRpm,
   Existence(..),
   ExistingStrategy(..),
@@ -25,6 +26,7 @@ import Data.List.Extra (foldl', groupOnKey, isInfixOf, nubOrd, nubSort, (\\))
 import Data.RPM.NVRA (NVRA(..), showNVRA)
 import Safe (headMay)
 import SimpleCmd (cmd_, cmdMaybe, error', sudo_, (+-+))
+import SimpleCmdArgs (Parser, flagLongWith', many, strOptionWith, (<|>))
 import SimplePrompt (yesNoDefault)
 import System.Directory
 import System.FilePath ((</>), (<.>))
@@ -41,6 +43,16 @@ data Select = All
 
 selectDefault :: Select
 selectDefault = PkgsReq [] [] [] []
+
+selectOptions :: Parser Select
+selectOptions =
+  flagLongWith' All "all" "all subpackages [default if not installed]" <|>
+  flagLongWith' Ask "ask" "ask for each subpackage" <|>
+  PkgsReq
+  <$> many (strOptionWith 'p' "package" "SUBPKG" "select subpackage (glob) matches")
+  <*> many (strOptionWith 'e' "except" "SUBPKG" "select subpackages not matching (glob)")
+  <*> many (strOptionWith 'x' "exclude" "SUBPKG" "deselect subpackage (glob): overrides -p and -e")
+  <*> many (strOptionWith 'i' "include" "SUBPKG" "additional subpackage (glob) to install: overrides -x")
 
 installArgs :: String -> Select
 installArgs cs =
