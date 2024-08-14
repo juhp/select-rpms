@@ -1,26 +1,26 @@
 cabal-version:       2.2
 name:                select-rpms
 version:             0.1.0
-synopsis:            Select packages project
+synopsis:            Select a subset of RPM packages
 description:
-        Short paragraph here
+        A library for selecting a subset of RPM (sub)packages.
 license:             MIT
 license-file:        LICENSE
 author:              Jens Petersen <juhpetersen@gmail.com>
 maintainer:          Jens Petersen <juhpetersen@gmail.com>
 copyright:           2024  Jens Petersen <juhpetersen@gmail.com>
-category:            Unclassified
+category:            Distribution
 homepage:            https://github.com/juhp/select-rpms
 bug-reports:         https://github.com/juhp/select-rpms/issues
 build-type:          Simple
---  extra-doc-files:     README.md
+extra-doc-files:     README.md
 --                       ChangeLog.md
--- tested-with:         GHC == 8.10.7
---                       || == 9.0.2
---                       || == 9.2.8
---                       || == 9.4.8
---                       || == 9.6.5
---                       || == 9.8.2
+tested-with:         GHC == 8.10.7
+                      || == 9.0.2
+                      || == 9.2.8
+                      || == 9.4.8
+                      || == 9.6.6
+                      || == 9.8.2
 
 source-repository head
   type:                git
