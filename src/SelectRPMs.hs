@@ -32,18 +32,21 @@ import System.Directory
 import System.FilePath ((</>), (<.>))
 import System.FilePath.Glob (compile, isLiteral, match)
 
-data Select = All
-            | Ask
+-- | The Select type specifies the subpackage selection
+data Select = All -- ^ all packages
+            | Ask -- ^ interactive prompting
             | PkgsReq
-              [String] -- include matches
-              [String] -- except matches
-              [String] -- exclude
-              [String] -- adde
+              [String] -- ^ include matches
+              [String] -- ^ except matches
+              [String] -- ^ exclude
+              [String] -- ^ added
   deriving Eq
 
+-- | default package selection
 selectDefault :: Select
 selectDefault = PkgsReq [] [] [] []
 
+-- | optparse-applicative Parser for Select
 selectOptions :: Parser Select
 selectOptions =
   flagLongWith' All "all" "all subpackages [default if not installed]" <|>
@@ -54,6 +57,7 @@ selectOptions =
   <*> many (strOptionWith 'x' "exclude" "SUBPKG" "deselect subpackage (glob): overrides -p and -e")
   <*> many (strOptionWith 'i' "include" "SUBPKG" "additional subpackage (glob) to install: overrides -x")
 
+-- | alternative CLI args option parsing to Select packages
 installArgs :: String -> Select
 installArgs cs =
   case words cs of
@@ -94,25 +98,39 @@ installArgs cs =
       then error' "empty pattern!"
       else f
 
+-- FIXME explain if/why this is actually needed (used by koji-tool install)
+-- | check package Select is not empty
 checkSelection :: Monad m => Select -> m ()
 checkSelection (PkgsReq ps es xs is) =
   forM_ (ps ++ es ++ xs ++ is) $ \s ->
   when (null s) $ error' "empty package pattern not allowed"
 checkSelection _ = return ()
 
+-- | how to handle already installed packages: re-install or skip
 data ExistingStrategy = ExistingNoReinstall | ExistingSkip
 
+-- | sets prompt default behaviour for yes/no questions
 data Yes = No | Yes
   deriving Eq
 
-data Existence = ExistingNVR | ChangedNVR | NotInstalled
+-- | current state of a package NVR
+data Existence = ExistingNVR -- ^ NVR is already installed
+               | ChangedNVR -- ^ NVR is different to installed package
+               | NotInstalled -- ^ package is not currently installed
   deriving (Eq, Ord, Show)
 
+-- | combines Existence state with an NVRA
 type ExistNVRA = (Existence, NVRA)
 
 -- FIXME determine and add missing internal deps
-decideRPMs :: Yes -> Bool -> Maybe ExistingStrategy -> Select -> String
-           -> [NVRA] -> IO [ExistNVRA]
+-- | decide list of NVRs based on a Select selection (using a package prefix)
+decideRPMs :: Yes -- ^ prompt default choice
+           -> Bool -- ^ enable list mode which just display the package list
+           -> Maybe ExistingStrategy -- ^ optional existing install strategy
+           -> Select -- ^ specifies package Select choices
+           -> String -- ^ package set prefix: allows abbreviated Select
+           -> [NVRA] -- ^ list of packages to select from
+           -> IO [ExistNVRA] -- ^ returns list of selected packages
 decideRPMs yes listmode mstrategy select prefix nvras = do
   classified <- mapMaybeM installExists (filter isBinaryRpm nvras)
   if listmode
@@ -149,8 +167,10 @@ decideRPMs yes listmode mstrategy select prefix nvras = do
           Just ExistingNoReinstall | existence == ExistingNVR -> Nothing
           _ -> Just (existence, nvra)
 
+-- FIXME move to submodule?
 selectRPMs :: String
-           -> ([String],[String],[String],[String]) -- (subpkgs,except,exclpkgs,addpkgs)
+           -- (subpkgs,except,exclpkgs,addpkgs)
+           -> ([String],[String],[String],[String])
            -> [ExistNVRA] -> [ExistNVRA]
 selectRPMs prefix (subpkgs,exceptpkgs,exclpkgs,addpkgs) rpms =
   let excluded = matchingRPMs prefix exclpkgs rpms
@@ -251,15 +271,23 @@ notDebugPkg :: String -> Bool
 notDebugPkg p =
   not ("-debuginfo-" `isInfixOf` p || "-debugsource-" `isInfixOf` p)
 
-data InstallType = ReInstall | Install
+-- | whether a package needs to be reinstalled or installed
+data InstallType = ReInstall
+                 | Install
 
+-- | package manager
 data PkgMgr = DNF3 | DNF5 | RPM | OSTREE
   deriving Eq
 
 -- FIXME support options per build: install ibus imsettings -i plasma
 -- (or don't error if multiple packages)
-installRPMs :: Bool -> Bool -> Maybe PkgMgr -> Yes
-            -> [(FilePath,[ExistNVRA])] -> IO ()
+-- | do installation of packages
+installRPMs :: Bool -- ^ dry-run
+            -> Bool -- ^ debug output
+            -> Maybe PkgMgr -- ^ optional specify package manager
+            -> Yes -- ^ prompt default choice
+            -> [(FilePath,[ExistNVRA])] -- ^ list of rpms to install with path
+            -> IO ()
 installRPMs _ _ _ _ [] = return ()
 installRPMs dryrun debug mmgr yes classifieds = do
   case installTypes (concatMap zipDir classifieds) of
@@ -328,11 +356,16 @@ installRPMs dryrun debug mmgr yes classifieds = do
         RPM -> ["-ivh"]
         OSTREE -> ["install"]
 
+-- | render a NVRA as rpm file
 showRpm :: NVRA -> FilePath
 showRpm nvra = showNVRA nvra <.> "rpm"
 
+-- | render path and NVRA are rpm filepath
 showRpmFile :: (FilePath,NVRA) -> FilePath
 showRpmFile (dir,nvra) = dir </> showRpm nvra
 
-groupOnArch :: [ExistNVRA] -> [(FilePath,[ExistNVRA])]
-groupOnArch = groupOnKey (rpmArch . snd)
+-- | group rpms by arch (subdirs)
+groupOnArch :: FilePath -- ^ prefix directory (eg "RPMS")
+            -> [ExistNVRA]
+            -> [(FilePath,[ExistNVRA])]
+groupOnArch dir = groupOnKey (\(_,p) -> dir </> rpmArch p)
