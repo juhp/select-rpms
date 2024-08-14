@@ -1,0 +1,4 @@
+resolver: lts-18.28
+extra-deps:
+  - extra-1.7.11
+  - simple-prompt-0.2.1

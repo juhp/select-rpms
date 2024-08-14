@@ -2,6 +2,7 @@ module SelectRPMs (
   installArgs,
   checkSelection,
   decideRPMs,
+  groupOnArch,
   installRPMs,
   notDebugPkg,
   printInstalled,
@@ -318,3 +319,6 @@ showRpm nvra = showNVRA nvra <.> "rpm"
 
 showRpmFile :: (FilePath,NVRA) -> FilePath
 showRpmFile (dir,nvra) = dir </> showRpm nvra
+
+groupOnArch :: [ExistNVRA] -> [(FilePath,[ExistNVRA])]
+groupOnArch = groupOnKey (rpmArch . snd)
