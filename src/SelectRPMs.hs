@@ -10,11 +10,11 @@ module SelectRPMs (
   notDebugPkg,
   printInstalled,
   selectDefault,
-  showRpm,
   rpmsToNVRAs,
   Existence(..),
   ExistingStrategy(..),
   ExistNVRA,
+  nvraToRPM,
   PkgMgr(..),
   Select(..),
   Yes(..)
@@ -362,13 +362,14 @@ installRPMs dryrun debug mmgr yes classifieds = do
         RPM -> ["-ivh"]
         OSTREE -> ["install"]
 
+-- FIXME replace with export from rpm-nvr
 -- | render a NVRA as rpm file
-showRpm :: NVRA -> FilePath
-showRpm nvra = showNVRA nvra <.> "rpm"
+nvraToRPM :: NVRA -> FilePath
+nvraToRPM nvra = showNVRA nvra <.> "rpm"
 
 -- | render path and NVRA are rpm filepath
 showRpmFile :: (FilePath,NVRA) -> FilePath
-showRpmFile (dir,nvra) = dir </> showRpm nvra
+showRpmFile (dir,nvra) = dir </> nvraToRPM nvra
 
 -- | group rpms by arch (subdirs)
 groupOnArch :: FilePath -- ^ prefix directory (eg "RPMS")
