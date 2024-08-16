@@ -11,6 +11,7 @@ module SelectRPMs (
   printInstalled,
   selectDefault,
   showRpm,
+  rpmsToNVRAs,
   Existence(..),
   ExistingStrategy(..),
   ExistNVRA,
@@ -22,8 +23,9 @@ where
 
 import Control.Monad.Extra (forM_, mapMaybeM, unless, when)
 import Data.Either (partitionEithers)
-import Data.List.Extra (foldl', groupOnKey, isInfixOf, nubOrd, nubSort, (\\))
-import Data.RPM.NVRA (NVRA(..), showNVRA)
+import Data.List.Extra (foldl', groupOnKey, isInfixOf, nubOrd, nubSort, sort,
+                        (\\))
+import Data.RPM.NVRA (NVRA(..), readNVRA, showNVRA)
 import Safe (headMay)
 import SimpleCmd (cmd_, cmdMaybe, error', sudo_, (+-+))
 import SimpleCmdArgs (Parser, flagLongWith', many, strOptionWith, (<|>))
@@ -105,6 +107,10 @@ checkSelection (PkgsReq ps es xs is) =
   forM_ (ps ++ es ++ xs ++ is) $ \s ->
   when (null s) $ error' "empty package pattern not allowed"
 checkSelection _ = return ()
+
+-- | converts a list of RPM files to NVRA's, filtering out debug subpackages
+rpmsToNVRAs :: [String] -> [NVRA]
+rpmsToNVRAs = sort . map readNVRA . filter notDebugPkg
 
 -- | how to handle already installed packages: re-install or skip
 data ExistingStrategy = ExistingNoReinstall | ExistingSkip
