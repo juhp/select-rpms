@@ -1,23 +1,21 @@
 {-# LANGUAGE TupleSections #-}
 
 module SelectRPMs (
+  Select(..),
+  selectDefault,
   selectRpmsOption,
   installArgs,
   checkSelection,
-  decideRPMs,
-  groupOnArch,
-  installRPMs,
-  notDebugPkg,
-  printInstalled,
-  selectDefault,
   rpmsToNVRAs,
   Existence(..),
-  ExistingStrategy(..),
   ExistNVRA,
+  Yes(..),
+  ExistingStrategy(..),
+  decideRPMs,
   nvraToRPM,
+  groupOnArch,
   PkgMgr(..),
-  Select(..),
-  Yes(..)
+  installRPMs
   )
 where
 
