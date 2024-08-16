@@ -1,6 +1,7 @@
 {-# LANGUAGE TupleSections #-}
 
 module SelectRPMs (
+  selectRpmsOption,
   installArgs,
   checkSelection,
   decideRPMs,
@@ -9,7 +10,6 @@ module SelectRPMs (
   notDebugPkg,
   printInstalled,
   selectDefault,
-  selectOptions,
   showRpm,
   Existence(..),
   ExistingStrategy(..),
@@ -47,8 +47,8 @@ selectDefault :: Select
 selectDefault = PkgsReq [] [] [] []
 
 -- | optparse-applicative Parser for Select
-selectOptions :: Parser Select
-selectOptions =
+selectRpmsOption :: Parser Select
+selectRpmsOption =
   flagLongWith' All "all" "all subpackages [default if not installed]" <|>
   flagLongWith' Ask "ask" "ask for each subpackage" <|>
   PkgsReq
