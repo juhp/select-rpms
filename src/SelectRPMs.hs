@@ -110,8 +110,12 @@ checkSelection _ = return ()
 rpmsToNVRAs :: [String] -> [NVRA]
 rpmsToNVRAs = sort . map readNVRA . filter notDebugPkg
 
--- | how to handle already installed packages: re-install or skip
-data ExistingStrategy = ExistingNoReinstall | ExistingSkip
+-- | how to handle already installed packages: re-install, skip, or
+-- default update
+--
+-- The default strategy is to select existing subpackages, otherwise all.
+data ExistingStrategy = ExistingNoReinstall | ExistingSkip | ExistingOnly
+  deriving Eq
 
 -- | sets prompt default behaviour for yes/no questions
 data Yes = No | Yes
@@ -147,10 +151,10 @@ decideRPMs yes listmode mstrategy select prefix nvras = do
     return []
     else
     case select of
-      All -> promptPkgs yes classified
+      All -> promptPkgs mstrategy yes classified
       Ask -> mapMaybeM (rpmPrompt yes) classified
       PkgsReq subpkgs exceptpkgs exclpkgs addpkgs ->
-        promptPkgs yes $
+        promptPkgs mstrategy yes $
         selectRPMs prefix (subpkgs,exceptpkgs,exclpkgs,addpkgs) classified
   where
     installExists :: NVRA -> IO (Maybe ExistNVRA)
@@ -169,6 +173,7 @@ decideRPMs yes listmode mstrategy select prefix nvras = do
         case mstrategy of
           Just ExistingSkip | existence /= NotInstalled -> Nothing
           Just ExistingNoReinstall | existence == ExistingNVR -> Nothing
+          Just ExistingOnly | existence == NotInstalled -> Nothing
           _ -> Just (existence, nvra)
 
 -- FIXME move to submodule?
@@ -200,10 +205,12 @@ renderInstalled (exist, nvra) =
 printInstalled :: ExistNVRA -> IO ()
 printInstalled = putStrLn . renderInstalled
 
-promptPkgs :: Yes -> [ExistNVRA]
-           -> IO [ExistNVRA]
-promptPkgs _ [] = error' "no rpms found"
-promptPkgs yes classified = do
+promptPkgs :: Maybe ExistingStrategy -> Yes -> [ExistNVRA] -> IO [ExistNVRA]
+promptPkgs (Just ExistingOnly) _ [] = do
+  putStrLn "skipped"
+  return []
+promptPkgs _ _ [] = error' "no rpms found"
+promptPkgs _ yes classified = do
   mapM_ printInstalled classified
   ok <- prompt yes "install above"
   return $ if ok then classified else []

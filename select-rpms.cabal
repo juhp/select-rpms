@@ -1,6 +1,6 @@
 cabal-version:       2.2
 name:                select-rpms
-version:             0.1.0
+version:             0.2.0
 synopsis:            Select a subset of RPM packages
 description:
         A library for selecting a subset of RPM (sub)packages.
