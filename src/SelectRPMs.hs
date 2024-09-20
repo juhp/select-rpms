@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE CPP, TupleSections #-}
 
 module SelectRPMs (
   Select(..),
@@ -25,7 +25,11 @@ import Data.List.Extra (foldl', groupOnKey, isInfixOf, nubOrd, nubSort, sort,
                         (\\))
 import Data.RPM.NVRA (NVRA(..), readNVRA, showNVRA)
 import Safe (headMay)
-import SimpleCmd (cmd_, cmdMaybe, error', sudo_, (+-+))
+import SimpleCmd (cmd_, cmdMaybe, error', sudo_, (+-+),
+#if MIN_VERSION_simple_cmd(0,2,7)
+                  sudoLog
+#endif
+                 )
 import SimpleCmdArgs (Parser, flagLongWith', many, strOptionWith, (<|>))
 import SimplePrompt (yesNoDefault)
 import System.Directory
@@ -348,7 +352,7 @@ installRPMs dryrun debug mmgr yes classifieds = do
           when debug $ mapM_ (putStrLn . showRpmFile) dirpkgs
           (case mgr of
             OSTREE -> cmd_
-            _ -> sudo_) pkgmgr $
+            _ -> if debug then sudoLog else sudo_) pkgmgr $
             com ++ map showRpmFile dirpkgs ++ ["--assumeyes" | yes == Yes && mgr `elem` [DNF3,DNF5]]
 
     reinstallCommand :: PkgMgr -> [String]
@@ -381,3 +385,10 @@ groupOnArch :: FilePath -- ^ prefix directory (eg "RPMS")
             -> [ExistNVRA]
             -> [(FilePath,[ExistNVRA])]
 groupOnArch dir = groupOnKey (\(_,p) -> dir </> rpmArch p)
+
+#if !MIN_VERSION_simple_cmd(0,2,7)
+sudoLog :: String -- ^ command
+     -> [String] -- ^ arguments
+     -> IO ()
+sudoLog = sudo_
+#endif
