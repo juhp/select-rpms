@@ -371,7 +371,7 @@ installRPMs dryrun debug mmgr yes classifieds = do
         RPM -> ["-ivh"]
         OSTREE -> ["install"]
 
--- FIXME replace with export from rpm-nvr
+-- FIXME replace with export from rpm-nvr (once released)
 -- | render a NVRA as rpm file
 nvraToRPM :: NVRA -> FilePath
 nvraToRPM nvra = showNVRA nvra <.> "rpm"
