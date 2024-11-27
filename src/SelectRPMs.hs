@@ -21,7 +21,10 @@ where
 
 import Control.Monad.Extra (forM_, mapMaybeM, unless, when)
 import Data.Either (partitionEithers)
-import Data.List.Extra (foldl', groupOnKey, isInfixOf, nubOrd, nubSort, sort,
+import Data.List.Extra (foldl', isInfixOf, nubOrd, nubSort, sort,
+#if MIN_VERSION_extra(1,7,11)
+                        groupOnKey,
+#endif
                         (\\))
 import Data.RPM.NVRA (NVRA(..), readNVRA, showNVRA)
 import Safe (headMay)
@@ -385,6 +388,15 @@ groupOnArch :: FilePath -- ^ prefix directory (eg "RPMS")
             -> [ExistNVRA]
             -> [(FilePath,[ExistNVRA])]
 groupOnArch dir = groupOnKey (\(_,p) -> dir </> rpmArch p)
+
+#if !MIN_VERSION_extra(1,7,11)
+groupOnKey :: Eq k => (a -> k) -> [a] -> [(k, [a])]
+groupOnKey _ []     = []
+groupOnKey f (x:xs) = (fx, x:yes) : groupOnKey f no
+    where
+        fx = f x
+        (yes, no) = span (\y -> fx == f y) xs
+#endif
 
 #if !MIN_VERSION_simple_cmd(0,2,7)
 sudoLog :: String -- ^ command
