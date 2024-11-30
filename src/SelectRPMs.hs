@@ -11,6 +11,7 @@ module SelectRPMs (
   ExistNVRA,
   Yes(..),
   ExistingStrategy(..),
+  existingStrategyOption,
   decideRPMs,
   nvraToRPM,
   groupOnArch,
@@ -33,7 +34,8 @@ import SimpleCmd (cmd_, cmdMaybe, error', sudo_, (+-+),
                   sudoLog
 #endif
                  )
-import SimpleCmdArgs (Parser, flagLongWith', many, strOptionWith, (<|>))
+import SimpleCmdArgs (Parser, flagWith', flagLongWith', many, strOptionWith,
+                      (<|>))
 import SimplePrompt (yesNoDefault)
 import System.Directory
 import System.FilePath ((</>), (<.>))
@@ -123,6 +125,13 @@ rpmsToNVRAs = sort . map readNVRA . filter notDebugPkg
 -- The default strategy is to select existing subpackages, otherwise all.
 data ExistingStrategy = ExistingNoReinstall | ExistingSkip | ExistingOnly
   deriving Eq
+
+existingStrategyOption :: Parser ExistingStrategy
+existingStrategyOption =
+  flagWith' ExistingNoReinstall 'N' "no-reinstall" "Do not reinstall existing NVRs" <|>
+  flagWith' ExistingSkip 'S' "skip-existing" "Ignore already installed subpackages (implies --no-reinstall)" <|>
+  flagWith' ExistingOnly 'O' "only-existing" "Only update existing installed subpackages"
+
 
 -- | sets prompt default behaviour for yes/no questions
 data Yes = No | Yes
