@@ -3,7 +3,7 @@
 module SelectRPMs (
   Select(..),
   selectDefault,
-  selectRpmsOption,
+  selectRpmsOptions,
   installArgs,
   checkSelection,
   rpmsToNVRAs,
@@ -54,8 +54,8 @@ selectDefault :: Select
 selectDefault = PkgsReq [] [] [] []
 
 -- | optparse-applicative Parser for Select
-selectRpmsOption :: Parser Select
-selectRpmsOption =
+selectRpmsOptions :: Parser Select
+selectRpmsOptions =
   flagLongWith' All "all" "all subpackages [default if not installed]" <|>
   flagLongWith' Ask "ask" "ask for each subpackage" <|>
   PkgsReq
