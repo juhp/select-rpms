@@ -22,7 +22,10 @@ where
 
 import Control.Monad.Extra (forM_, mapMaybeM, unless, when)
 import Data.Either (partitionEithers)
-import Data.List.Extra (foldl', isInfixOf, nubOrd, nubSort, sort,
+import Data.List.Extra (isInfixOf, nubOrd, nubSort, sort,
+#if !MIN_VERSION_base(4,20,0)
+                        foldl',
+#endif
 #if MIN_VERSION_extra(1,7,11)
                         groupOnKey,
 #endif
