@@ -123,15 +123,15 @@ rpmsToNVRAs = sort . map readNVRA . filter notDebugPkg
 -- default update
 --
 -- The default strategy is to select existing subpackages, otherwise all.
-data ExistingStrategy = ExistingNoReinstall | ExistingSkip | ExistingOnly
+data ExistingStrategy = ExistingNoReinstall | ExistingSkip | ExistingOnly | ExistingError
   deriving Eq
 
 existingStrategyOption :: Parser ExistingStrategy
 existingStrategyOption =
   flagWith' ExistingNoReinstall 'N' "no-reinstall" "Do not reinstall existing NVRs" <|>
   flagWith' ExistingSkip 'S' "skip-existing" "Ignore already installed subpackages (implies --no-reinstall)" <|>
-  flagWith' ExistingOnly 'O' "only-existing" "Only update existing installed subpackages"
-
+  flagWith' ExistingOnly 'O' "only-existing" "Only update existing installed subpackages" <|>
+  flagWith' ExistingError 'E' "error-existing" "Abort for existing installed subpackages"
 
 -- | sets prompt default behaviour for yes/no questions
 data Yes = No | Yes
@@ -190,6 +190,7 @@ decideRPMs yes listmode mstrategy select prefix nvras = do
           Just ExistingSkip | existence /= NotInstalled -> Nothing
           Just ExistingNoReinstall | existence == ExistingNVR -> Nothing
           Just ExistingOnly | existence == NotInstalled -> Nothing
+          Just ExistingError | existence /= NotInstalled -> error' $ "aborting:" +-+ rpmName nvra +-+ "already installed"
           _ -> Just (existence, nvra)
 
 -- FIXME move to submodule?
