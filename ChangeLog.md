@@ -1,5 +1,8 @@
 # Release history for select-rpms
 
+## 0.3.0 (2025-06-04)
+- ExistingStrategy: add ExistingError which aborts for existing installed pkg
+
 ## 0.2.0 (2024-12-01)
 - extend ExistingStrategy with ExistingOnly
 - use sudoLog with --debug, falling back to old sudo_
