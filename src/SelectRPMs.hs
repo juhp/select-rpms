@@ -123,6 +123,9 @@ rpmsToNVRAs = sort . map readNVRA . filter notDebugPkg
 -- default update
 --
 -- The default strategy is to select existing subpackages, otherwise all.
+--
+-- The constructors are only really needed internally but exported for
+-- documentation.
 data ExistingStrategy = ExistingNoReinstall | ExistingSkip | ExistingOnly | ExistingError
   deriving Eq
 
