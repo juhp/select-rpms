@@ -1,5 +1,8 @@
 # Release history for select-rpms
 
+## 0.3.1 (2025-08-21)
+- add installRPMsAllowErasing which extends installRPMs
+
 ## 0.3.0 (2025-06-04)
 - ExistingStrategy: add ExistingError which aborts for existing installed pkg
 

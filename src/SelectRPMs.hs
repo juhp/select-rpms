@@ -16,7 +16,8 @@ module SelectRPMs (
   nvraToRPM,
   groupOnArch,
   PkgMgr(..),
-  installRPMs
+  installRPMs,
+  installRPMsAllowErasing
   )
 where
 
@@ -313,8 +314,6 @@ data InstallType = ReInstall
 data PkgMgr = DNF3 | DNF5 | RPM | OSTREE
   deriving Eq
 
--- FIXME support options per build: install ibus imsettings -i plasma
--- (or don't error if multiple packages)
 -- | do installation of packages
 installRPMs :: Bool -- ^ dry-run
             -> Bool -- ^ debug output
@@ -322,8 +321,23 @@ installRPMs :: Bool -- ^ dry-run
             -> Yes -- ^ prompt default choice
             -> [(FilePath,[ExistNVRA])] -- ^ list of rpms to install with path
             -> IO ()
-installRPMs _ _ _ _ [] = return ()
-installRPMs dryrun debug mmgr yes classifieds = do
+installRPMs dryrun debug mmgr =
+  installRPMsAllowErasing dryrun debug mmgr False
+
+-- FIXME support options per build: install ibus imsettings -i plasma
+-- (or don't error if multiple packages)
+-- | do installation of packages (with allowerasing switch)
+--
+-- (since 0.3.1)
+installRPMsAllowErasing :: Bool -- ^ dry-run
+                        -> Bool -- ^ debug output
+                        -> Maybe PkgMgr -- ^ optional specify package manager
+                        -> Bool -- ^ use dnf --allowerasing
+                        -> Yes -- ^ prompt default choice
+                        -> [(FilePath,[ExistNVRA])] -- ^ list of rpms to install with path
+                        -> IO ()
+installRPMsAllowErasing _ _ _ _ _ [] = return ()
+installRPMsAllowErasing dryrun debug mmgr allowerasing yes classifieds =
   case installTypes (concatMap zipDir classifieds) of
     ([],is) -> doInstall Install is
     (ris,is) -> do
@@ -372,7 +386,7 @@ installRPMs dryrun debug mmgr yes classifieds = do
           (case mgr of
             OSTREE -> cmd_
             _ -> if debug then sudoLog else sudo_) pkgmgr $
-            com ++ map showRpmFile dirpkgs ++ ["--assumeyes" | yes == Yes && mgr `elem` [DNF3,DNF5]]
+            com ++ map showRpmFile dirpkgs ++ ["--allowerasing" | allowerasing] ++ ["--assumeyes" | yes == Yes && mgr `elem` [DNF3,DNF5]]
 
     reinstallCommand :: PkgMgr -> [String]
     reinstallCommand mgr =
