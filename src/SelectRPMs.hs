@@ -133,6 +133,7 @@ rpmsToNVRAs = sort . map readNVRA . filter notDebugPkg
 data ExistingStrategy = ExistingNoReinstall | ExistingSkip | ExistingOnly | ExistingError
   deriving Eq
 
+-- | optparse-applicative Parser for ExistingStrategy
 existingStrategyOption :: Parser ExistingStrategy
 existingStrategyOption =
   flagWith' ExistingNoReinstall 'N' "no-reinstall" "Do not reinstall existing NVRs" <|>
