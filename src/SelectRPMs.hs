@@ -411,7 +411,7 @@ installRPMsAllowErasing dryrun debug mmgr allowerasing yes classifieds =
       case mgr of
         DNF3 -> ["localinstall"]
         DNF5 -> ["install"]
-        RPM -> ["-ivh"]
+        RPM -> ["-Uvh"]
         OSTREE -> ["install"]
 
 -- FIXME replace with export from rpm-nvr (once released)
