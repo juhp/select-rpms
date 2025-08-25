@@ -1,7 +1,8 @@
 # Release history for select-rpms
 
-## 0.3.1 (2025-08-21)
+## 0.3.1 (2025-08-25)
 - add installRPMsAllowErasing which extends installRPMs
+- add pkgMgrOpt (from koji-tool)
 
 ## 0.3.0 (2025-06-04)
 - ExistingStrategy: add ExistingError which aborts for existing installed pkg

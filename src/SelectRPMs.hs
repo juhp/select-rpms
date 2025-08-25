@@ -16,6 +16,7 @@ module SelectRPMs (
   nvraToRPM,
   groupOnArch,
   PkgMgr(..),
+  pkgMgrOpt,
   installRPMs,
   installRPMsAllowErasing
   )
@@ -314,6 +315,14 @@ data InstallType = ReInstall
 -- | package manager
 data PkgMgr = DNF3 | DNF5 | RPM | OSTREE
   deriving Eq
+
+-- | optparse-applicative Parser for PkgMgr
+pkgMgrOpt :: Parser PkgMgr
+pkgMgrOpt =
+  flagLongWith' RPM "rpm" "Use rpm instead of dnf" <|>
+  flagLongWith' OSTREE "rpm-ostree" "Use rpm-ostree instead of dnf" <|>
+  flagLongWith' DNF5 "dnf5" "Use dnf5 to install" <|>
+  flagLongWith' DNF3 "dnf3" "Use dnf-3 to install [default dnf unless ostree]"
 
 -- | do installation of packages
 installRPMs :: Bool -- ^ dry-run
