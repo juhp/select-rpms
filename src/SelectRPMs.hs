@@ -24,7 +24,7 @@ where
 
 import Control.Monad.Extra (forM_, mapMaybeM, unless, when)
 import Data.Either (partitionEithers)
-import Data.List.Extra (isInfixOf, nubOrd, nubSort, sort,
+import Data.List.Extra (isPrefixOf, isSuffixOf, nubOrd, nubSort, sort,
 #if !MIN_VERSION_base(4,20,0)
                         foldl',
 #endif
@@ -71,7 +71,7 @@ selectRpmsOptions =
   <*> many (strOptionWith 'x' "exclude" "SUBPKG" "deselect subpackage (glob): overrides -p and -e")
   <*> many (strOptionWith 'i' "include" "SUBPKG" "additional subpackage (glob) to install: overrides -x")
 
--- | alternative CLI args option parsing to Select packages
+-- | alternative CLI args option parsing to Select of rpm packages
 installArgs :: String -> Select
 installArgs cs =
   case words cs of
@@ -112,17 +112,21 @@ installArgs cs =
       then error' "empty pattern!"
       else f
 
--- FIXME explain if/why this is actually needed (used by koji-tool install)
--- | check package Select is not empty
+-- FIXME check allowed characters
+-- | check package Select options have no empty strings
+--
+-- (deprecated export)
 checkSelection :: Monad m => Select -> m ()
 checkSelection (PkgsReq ps es xs is) =
   forM_ (ps ++ es ++ xs ++ is) $ \s ->
   when (null s) $ error' "empty package pattern not allowed"
 checkSelection _ = return ()
 
--- | converts a list of RPM files to NVRA's, filtering out debug subpackages
+-- | converts a list of RPM files to sorted NVRA's
+--
+-- (since 0.3.1 no longer excludes debuginfo and debugsource packages)
 rpmsToNVRAs :: [String] -> [NVRA]
-rpmsToNVRAs = sort . map readNVRA . filter notDebugPkg
+rpmsToNVRAs = sort . map readNVRA
 
 -- | how to handle already installed packages: re-install, skip, or
 -- default update
@@ -165,14 +169,15 @@ decideRPMs :: Yes -- ^ prompt default choice
            -> [NVRA] -- ^ list of packages to select from
            -> IO [ExistNVRA] -- ^ returns list of selected packages
 decideRPMs yes listmode mstrategy select prefix nvras = do
+  checkSelection select
   classified <- mapMaybeM installExists (filter isBinaryRpm nvras)
   if listmode
     then do
-    case select of
-      PkgsReq subpkgs exceptpkgs exclpkgs addpkgs ->
-        mapM_ printInstalled $
-        selectRPMs prefix (subpkgs,exceptpkgs,exclpkgs,addpkgs) classified
-      _ -> mapM_ printInstalled classified
+    mapM_ printInstalled $
+      case select of
+        PkgsReq subpkgs exceptpkgs exclpkgs addpkgs ->
+          selectRPMs prefix (subpkgs,exceptpkgs,exclpkgs,addpkgs) classified
+        _ -> classified
     return []
     else
     case select of
@@ -212,7 +217,7 @@ selectRPMs prefix (subpkgs,exceptpkgs,exclpkgs,addpkgs) rpms =
       included = matchingRPMs prefix addpkgs rpms
       matching =
         if null subpkgs && null exceptpkgs
-        then defaultRPMs rpms
+        then defaultRPMs prefix rpms
         else matchingRPMs prefix subpkgs rpms
       nonmatching = nonMatchingRPMs prefix exceptpkgs rpms
   in nubSort $ ((matching ++ nonmatching) \\ excluded) ++ included
@@ -255,24 +260,36 @@ rpmPrompt yes epn = do
     then Just epn
     else Nothing
 
-defaultRPMs :: [ExistNVRA] -> [ExistNVRA]
-defaultRPMs rpms =
+defaultRPMs :: String -> [ExistNVRA] -> [ExistNVRA]
+defaultRPMs prefix rpms =
   let installed = filter ((/= NotInstalled) . fst) rpms
   in if null installed
-     then rpms
+     then filter (wantedSubpackage . rpmName . snd) rpms
      else installed
+  where
+    wantedSubpackage :: String -> Bool
+    wantedSubpackage p =
+      notDebugPkg p && defaultSubpackage p
 
+    notDebugPkg :: String -> Bool
+    notDebugPkg p =
+      not ("-debuginfo" `isSuffixOf` p || "-debugsource" `isSuffixOf` p)
+
+    defaultSubpackage :: String -> Bool
+    defaultSubpackage p =
+      if "ghc" `isPrefixOf` prefix
+      then not ("-doc" `isSuffixOf` p || "-prof" `isSuffixOf` p || "compiler-default" `isSuffixOf` p)
+      else True
+
+-- FIXME add --strict (must match) switch
 matchingRPMs :: String -> [String] -> [ExistNVRA] -> [ExistNVRA]
 matchingRPMs prefix subpkgs rpms =
   nubSort . mconcat $
-  flip map (nubOrd subpkgs) $ \ pkgpat ->
+  flip map (nubOrd subpkgs) $ \pkgpat ->
   case getMatches pkgpat of
     [] -> if headMay pkgpat /= Just '*'
-          then
-            case getMatches (prefix ++ '-' : pkgpat) of
-              [] -> error' $ "no subpackage match for " ++ pkgpat
-              result -> result
-          else error' $ "no subpackage match for " ++ pkgpat
+          then getMatches (prefix ++ '-' : pkgpat)
+          else []
     result -> result
   where
     getMatches :: String -> [ExistNVRA]
@@ -304,10 +321,6 @@ nonMatchingRPMs prefix subpkgs rpms =
                   (prefix ++ '-' : pat) == rpmname
              else match comppat rpmname
 
-notDebugPkg :: String -> Bool
-notDebugPkg p =
-  not ("-debuginfo-" `isInfixOf` p || "-debugsource-" `isInfixOf` p)
-
 -- | whether a package needs to be reinstalled or installed
 data InstallType = ReInstall
                  | Install
@@ -317,6 +330,8 @@ data PkgMgr = DNF3 | DNF5 | RPM | OSTREE
   deriving Eq
 
 -- | optparse-applicative Parser for PkgMgr
+--
+-- (since 0.3.1)
 pkgMgrOpt :: Parser PkgMgr
 pkgMgrOpt =
   flagLongWith' RPM "rpm" "Use rpm instead of dnf" <|>
@@ -324,7 +339,7 @@ pkgMgrOpt =
   flagLongWith' DNF5 "dnf5" "Use dnf5 to install" <|>
   flagLongWith' DNF3 "dnf3" "Use dnf-3 to install [default dnf unless ostree]"
 
--- | do installation of packages
+-- | do installation of selected rpm packages
 installRPMs :: Bool -- ^ dry-run
             -> Bool -- ^ debug output
             -> Maybe PkgMgr -- ^ optional specify package manager

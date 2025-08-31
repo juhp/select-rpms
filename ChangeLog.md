@@ -1,9 +1,13 @@
 # Release history for select-rpms
 
-## 0.3.1 (2025-08-31)
-- add installRPMsAllowErasing which extends installRPMs
+## 0.3.1 (2025-09-13)
+- selections that do not match any RPMs no longer error
+- installing debuginfo/debugsource now possible if requested
+- default presets for certain package prefixes (currently only ghc*)
 - add pkgMgrOpt (from koji-tool)
-- installRPMs installCommand: use rpm -U since package may exist
+- add installRPMsAllowErasing which extends installRPMs
+- installRPMs (installCommand): use rpm -U since package may exist
+- checkSelection: now used directly by decideRPMs
 
 ## 0.3.0 (2025-06-04)
 - ExistingStrategy: add ExistingError which aborts for existing installed pkg
