@@ -277,9 +277,9 @@ defaultRPMs prefix rpms =
 
     defaultSubpackage :: String -> Bool
     defaultSubpackage p =
-      if "ghc" `isPrefixOf` prefix
-      then not ("-doc" `isSuffixOf` p || "-prof" `isSuffixOf` p || "compiler-default" `isSuffixOf` p)
-      else True
+      not ("ghc" `isPrefixOf` prefix)
+      ||
+      not ("-doc" `isSuffixOf` p || "-prof" `isSuffixOf` p || "compiler-default" `isSuffixOf` p)
 
 -- FIXME add --strict (must match) switch
 matchingRPMs :: String -> [String] -> [ExistNVRA] -> [ExistNVRA]
