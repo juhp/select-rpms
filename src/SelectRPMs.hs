@@ -47,6 +47,8 @@ import System.FilePath ((</>), (<.>))
 import System.FilePath.Glob (compile, isLiteral, match)
 
 -- | The Select type specifies the subpackage selection
+--
+-- Can use name globs: eg "*-devel" or "lib*"
 data Select = All -- ^ all packages
             | Ask -- ^ interactive prompting
             | PkgsReq
@@ -56,11 +58,11 @@ data Select = All -- ^ all packages
               [String] -- ^ added
   deriving Eq
 
--- | default package selection
+-- | Default package selection
 selectDefault :: Select
 selectDefault = PkgsReq [] [] [] []
 
--- | optparse-applicative Parser for Select
+-- | An optparse-applicative Parser for Select
 selectRpmsOptions :: Parser Select
 selectRpmsOptions =
   flagLongWith' All "all" "all subpackages [default if not installed]" <|>
@@ -71,7 +73,7 @@ selectRpmsOptions =
   <*> many (strOptionWith 'x' "exclude" "SUBPKG" "deselect subpackage (glob): overrides -p and -e")
   <*> many (strOptionWith 'i' "include" "SUBPKG" "additional subpackage (glob) to install: overrides -x")
 
--- | alternative CLI args option parsing to Select of rpm packages
+-- | An alternative CLI args option to parse String to Select of rpm packages
 installArgs :: String -> Select
 installArgs cs =
   case words cs of
@@ -113,7 +115,7 @@ installArgs cs =
       else f
 
 -- FIXME check allowed characters
--- | check package Select options have no empty strings
+-- | Check package Select options have no empty strings
 --
 -- (deprecated export)
 checkSelection :: Monad m => Select -> m ()
@@ -122,23 +124,26 @@ checkSelection (PkgsReq ps es xs is) =
   when (null s) $ error' "empty package pattern not allowed"
 checkSelection _ = return ()
 
--- | converts a list of RPM files to sorted NVRA's
+-- | Converts a list of RPM files to sorted NVRA's
 --
 -- (since 0.3.1 no longer excludes debuginfo and debugsource packages)
 rpmsToNVRAs :: [String] -> [NVRA]
 rpmsToNVRAs = sort . map readNVRA
 
--- | how to handle already installed packages: re-install, skip, or
+-- | How to handle already installed subpackages: re-install, skip, or
 -- default update
 --
 -- The default strategy is to select existing subpackages, otherwise all.
 --
 -- The constructors are only really needed internally but exported for
 -- documentation.
-data ExistingStrategy = ExistingNoReinstall | ExistingSkip | ExistingOnly | ExistingError
+data ExistingStrategy = ExistingNoReinstall -- ^ skip reinstall of same NVRs
+                      | ExistingSkip        -- ^ skip installed subpkgs
+                      | ExistingOnly        -- ^ only update existing subpkgs
+                      | ExistingError       -- ^ abort for existing subpkg
   deriving Eq
 
--- | optparse-applicative Parser for ExistingStrategy
+-- | An optparse-applicative Parser for ExistingStrategy
 existingStrategyOption :: Parser ExistingStrategy
 existingStrategyOption =
   flagWith' ExistingNoReinstall 'N' "no-reinstall" "Do not reinstall existing NVRs" <|>
@@ -146,28 +151,28 @@ existingStrategyOption =
   flagWith' ExistingOnly 'O' "only-existing" "Only update existing installed subpackages" <|>
   flagWith' ExistingError 'E' "error-existing" "Abort for existing installed subpackages"
 
--- | sets prompt default behaviour for yes/no questions
+-- | Sets prompt default behaviour for yes/no questions
 data Yes = No | Yes
   deriving Eq
 
--- | current state of a package NVR
+-- | Current state of a package NVR
 data Existence = ExistingNVR -- ^ NVR is already installed
                | ChangedNVR -- ^ NVR is different to installed package
                | NotInstalled -- ^ package is not currently installed
   deriving (Eq, Ord, Show)
 
--- | combines Existence state with an NVRA
+-- | Combines Existence state with an NVRA
 type ExistNVRA = (Existence, NVRA)
 
 -- FIXME determine and add missing internal deps
--- | decide list of NVRs based on a Select selection (using a package prefix)
+-- | Decide list of NVRs based on a Select selection (using a package prefix)
 decideRPMs :: Yes -- ^ prompt default choice
-           -> Bool -- ^ enable list mode which just display the package list
+           -> Bool -- ^ enable list mode which just displays the package list
            -> Maybe ExistingStrategy -- ^ optional existing install strategy
            -> Select -- ^ specifies package Select choices
-           -> String -- ^ package set prefix: allows abbreviated Select
-           -> [NVRA] -- ^ list of packages to select from
-           -> IO [ExistNVRA] -- ^ returns list of selected packages
+           -> String -- ^ package set prefix: allows Select'ing without prefix
+           -> [NVRA] -- ^ list of rpm packages to select from
+           -> IO [ExistNVRA] -- ^ returns list of selected rpm packages
 decideRPMs yes listmode mstrategy select prefix nvras = do
   checkSelection select
   classified <- mapMaybeM installExists (filter isBinaryRpm nvras)
@@ -321,15 +326,15 @@ nonMatchingRPMs prefix subpkgs rpms =
                   (prefix ++ '-' : pat) == rpmname
              else match comppat rpmname
 
--- | whether a package needs to be reinstalled or installed
+-- | Whether a package needs to be reinstalled or installed
 data InstallType = ReInstall
                  | Install
 
--- | package manager
+-- | Package manager
 data PkgMgr = DNF3 | DNF5 | RPM | OSTREE
   deriving Eq
 
--- | optparse-applicative Parser for PkgMgr
+-- | An optparse-applicative Parser for PkgMgr
 --
 -- (since 0.3.1)
 pkgMgrOpt :: Parser PkgMgr
@@ -339,7 +344,7 @@ pkgMgrOpt =
   flagLongWith' DNF5 "dnf5" "Use dnf5 to install" <|>
   flagLongWith' DNF3 "dnf3" "Use dnf-3 to install [default dnf unless ostree]"
 
--- | do installation of selected rpm packages
+-- | Do installation of selected rpm packages
 installRPMs :: Bool -- ^ dry-run
             -> Bool -- ^ debug output
             -> Maybe PkgMgr -- ^ optional specify package manager
@@ -351,7 +356,7 @@ installRPMs dryrun debug mmgr =
 
 -- FIXME support options per build: install ibus imsettings -i plasma
 -- (or don't error if multiple packages)
--- | do installation of packages (with allowerasing switch)
+-- | Do installation of packages (with allowerasing switch)
 --
 -- (since 0.3.1)
 installRPMsAllowErasing :: Bool -- ^ dry-run
@@ -430,15 +435,15 @@ installRPMsAllowErasing dryrun debug mmgr allowerasing yes classifieds =
         OSTREE -> ["install"]
 
 -- FIXME replace with export from rpm-nvr (once released)
--- | render a NVRA as rpm file
+-- | Render a NVRA as rpm file
 nvraToRPM :: NVRA -> FilePath
 nvraToRPM nvra = showNVRA nvra <.> "rpm"
 
--- | render path and NVRA are rpm filepath
+-- | Render path and NVRA are rpm filepath
 showRpmFile :: (FilePath,NVRA) -> FilePath
 showRpmFile (dir,nvra) = dir </> nvraToRPM nvra
 
--- | group rpms by arch (subdirs)
+-- | Group rpms by arch (subdirs)
 groupOnArch :: FilePath -- ^ prefix directory (eg "RPMS")
             -> [ExistNVRA]
             -> [(FilePath,[ExistNVRA])]
